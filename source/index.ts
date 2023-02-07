@@ -1,24 +1,38 @@
 import {registerSharedWorker, SharedWorker} from 'ava/plugin';
-import {Lock, UnmanagedSemaphore, SharedContext} from '@ava/cooperate';
 import never from 'never';
-
 import {Bucket, Data, Key, MessageType, TaskResult} from './types.js';
+
+// CJS hacks
+import { pathToFileURL } from 'url';
+const import_meta_url = pathToFileURL(__filename);
+// @ts-ignore
+import type * as cooperate from '@ava/cooperate';
+let {Lock, UnmanagedSemaphore, SharedContext} = {} as typeof cooperate;
+const importEsmDeps = importEsmDepsWorker();
+async function importEsmDepsWorker() {
+	({Lock, UnmanagedSemaphore, SharedContext} = await import('@ava/cooperate'));
+}
 
 type ReceivedMessage = SharedWorker.Plugin.ReceivedMessage<Data>;
 
 const protocol = registerSharedWorker<Data>({
-	filename: new URL('worker.js', import.meta.url),
+	filename: new URL('worker.mjs', import_meta_url),
 	supportedProtocols: ['ava-4'],
 });
 
 export class Context<T = any> {
-	readonly #context: string;
+	readonly #id: string;
 	readonly #cooperatePrefix: string;
-	readonly #cooperateContext: SharedContext;
+	#cooperateContext!: cooperate.SharedContext;
 
-	constructor(context: string) {
-		this.#context = context;
-		this.#cooperatePrefix = import.meta.url + '\0' + context + '\0';
+	constructor(id: string) {
+		this.#id = id;
+		this.#cooperatePrefix = import_meta_url + '\0' + id + '\0';
+	}
+
+	// CJS hacks
+	async #initCooperate() {
+		await importEsmDeps;
 		this.#cooperateContext = new SharedContext(this.#cooperatePrefix);
 	}
 
@@ -29,7 +43,7 @@ export class Context<T = any> {
 	async #get(bucket: Bucket, name: Key): Promise<any> {
 		const message = protocol.publish({
 			type: MessageType.GET_REQUEST,
-			context: this.#context,
+			context: this.#id,
 			bucket,
 			name,
 		});
@@ -50,7 +64,7 @@ export class Context<T = any> {
 	async #set(bucket: Bucket, name: Key, value: any): Promise<void> {
 		const message = protocol.publish({
 			type: MessageType.SET_REQUEST,
-			context: this.#context,
+			context: this.#id,
 			bucket,
 			name,
 			value
@@ -66,6 +80,7 @@ export class Context<T = any> {
 	}
 
 	async task(name: string, exec: () => PromiseLike<void>) {
+		await this.#initCooperate();
 		const lock = new Lock(this.#cooperateContext, name);
 		const semaphore = new UnmanagedSemaphore(this.#cooperateContext, name, 1);
 		const release = await lock.acquire();

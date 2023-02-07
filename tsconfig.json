@@ -4,7 +4,8 @@
 		"outDir": "dist",
 		"sourceMap": true,
 		"declaration": true,
-		"module": "ESNext",
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
 	},
 	"include": [
 		"source",
